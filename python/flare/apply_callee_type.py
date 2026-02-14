@@ -30,18 +30,23 @@ import re
 import sys
 import ctypes
 import logging
+import os
 
-from PyQt5 import QtWidgets
-from PyQt5 import QtCore 
-from PyQt5.QtCore import Qt
+from PySide6 import QtWidgets, QtCore
+from PySide6.QtCore import Qt
 
 import idc
 import idaapi
 import idautils
 
-from . import jayutils
+import jayutils
 
-from .apply_callee_type_widget import Ui_ApplyCalleeDialog
+try:
+    from .apply_callee_type_widget import Ui_ApplyCalleeDialog
+except Exception:
+    # Support running as a script (no package) by falling back
+    # to an absolute import when the relative import isn't available.
+    from apply_callee_type_widget import Ui_ApplyCalleeDialog
 
 logger = None
 
@@ -259,7 +264,11 @@ class ApplyCalleeTypeRunner(object):
 
             dlg = ApplyCalleeTypeWidget()
             oldTo = idaapi.set_script_timeout(0)
-            res = dlg.exec_()
+            # support both Qt5 and Qt6 dialog exec methods
+            if hasattr(dlg, 'exec_'):
+                res = dlg.exec_()
+            else:
+                res = dlg.exec()
             idaapi.set_script_timeout(oldTo)
 
             if res == QtWidgets.QDialog.Accepted:
@@ -352,3 +361,34 @@ def main():
 if __name__ == '__main__':
     main()
 
+
+# Minimal PLUGIN_ENTRY stub so IDA can import this module from the
+# plugins folder without warning. The stub returns PLUGIN_SKIP so
+# IDA won't try to run it as a plugin.
+class ApplyCalleeTypePlugin(idaapi.plugin_t):
+    flags = idaapi.PLUGIN_FIX
+    comment = 'Apply callee type helper'
+    help = 'Apply callee type to an indirect call at cursor'
+    wanted_name = 'ApplyCalleeType'
+    wanted_hotkey = ''
+
+    def init(self):
+        env_interactive = os.environ.get('IDA_IS_INTERACTIVE')
+        if not env_interactive or env_interactive == '0':
+            return idaapi.PLUGIN_SKIP
+        return idaapi.PLUGIN_KEEP
+
+    def run(self, arg):
+        global logger
+        logger = jayutils.configLogger(__name__, logging.INFO)
+        launcher = ApplyCalleeTypeRunner()
+        try:
+            launcher.run()
+        except Exception as e:
+            idaapi.msg('ApplyCalleeType plugin exception: %s\n' % e)
+
+    def term(self):
+        pass
+
+def PLUGIN_ENTRY():
+    return ApplyCalleeTypePlugin()
